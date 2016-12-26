@@ -1,0 +1,193 @@
+---
+title: "PML_Project"
+author: "DanH"
+date: "December 25, 2016"
+output:
+  html_document:
+    keep_md: yes
+    theme: readable
+  pdf_document: default
+---
+
+###Overview
+
+For this project the goal is to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants to predict the manner in which they did the exercise. This is the "classe" variable in the training set. Then, the selected prediction model will be used to predict 20 different test cases.
+
+
+###Load Data and packages
+
+```{r, message=FALSE, warning=FALSE}
+
+# packages
+library(tidyverse)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(rattle)
+library(randomForest)
+library(corrplot)
+set.seed(12345)
+
+
+# download the two datsets
+train <-  read_csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+
+test <- read_csv("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+
+```
+
+
+###Data partitioning
+
+Because we want to estimate the _out-of-sample error_, we split the full dataset(train) into a training set (trainset) and a validation set (testset)
+
+```{r, message=FALSE, warning=FALSE}
+# split data to create trainset and testset
+inTrain  <- createDataPartition(train$classe, p=0.7, list=FALSE) %>%
+  as_data_frame(inTrain) %>% rename(X1 = Resample1)
+
+trainset <- semi_join(train, inTrain)
+testset <- anti_join(train, inTrain)
+dim(trainset)
+```
+
+###Data cleaning
+
+* First we remove variables with near Zero variance (NZV)
+* We then delete predictors containing missing values
+* Finally we remove useless variables
+
+
+```{r}
+NZV <- nearZeroVar(trainset)
+
+trainset <-  trainset %>%
+  select(-NZV) %>%
+  select(which(colMeans(is.na(.)) == 0),
+         -(1:5))
+
+testset <- testset %>% 
+  select(-NZV) %>%
+  select(which(colMeans(is.na(.)) == 0),
+         -(1:5))
+```
+
+
+We're now left with only 54 variables in each dataset
+
+####Correlation
+
+We can visualize correlation among predictors left in our dataset
+
+```{r, fig.align='center', fig.height=10}
+corMatrix <- cor(trainset[, -51])
+corrplot(corMatrix, order = "FPC", method = "color", type = "lower", 
+         tl.cex = 0.6, tl.col = rgb(0, 0, 0))
+```
+
+
+---
+
+###Modeling
+
+Here we try to fit some ML models to our data and see which one performs better. We will try:
+
+* Decision Trees
+* Random Forest
+* Generalized Boosted Model
+
+---
+
+####Decision Trees
+
+```{r, fig.width=12, fig.height=12}
+
+# fitting the model
+set.seed(12345)
+DTree_ModFit <- rpart(classe ~ ., data=trainset, method="class")
+
+# prediction 
+DTree_predict <- predict(DTree_ModFit, newdata=testset, type="class")
+DTree_ConfMat <- confusionMatrix(DTree_predict, testset$classe)
+DTree_ConfMat
+```
+
+So, for the decision trees method we have **Accuracy: 0.7519**
+
+---
+
+####Random Forest
+
+We now try a Random Forest model and see how it performs. We use a 3-fold cross-validation.
+
+```{r}
+set.seed(12345)
+# Model fitting
+RF_control <- trainControl(method="cv", 3)
+RF_model <- train(classe ~ ., data=trainset, method="rf", trControl=RF_control, ntree=200)
+RF_model$finalModel
+
+# Prediction 
+RF_predict <- predict(RF_model, newdata=testset)
+RF_confMatrix <- confusionMatrix(RF_predict, testset$classe)
+RF_confMatrix
+```
+
+So, for the Random Forest method we have **Accuracy: 0.995**
+
+---
+
+####Generalized Boosted Model
+
+FInally we try a Generalized Boosted Model. 
+
+```{r, message=FALSE, warning=FALSE}
+set.seed(12345)
+
+# model fitting
+GBM_control <- trainControl(method = "repeatedcv", number = 5, repeats = 1)
+GBM_modFit  <- train(classe ~ ., data=trainset, method = "gbm",
+                    trControl = GBM_control, verbose = FALSE)
+GBM_modFit$finalModel
+
+# prediction 
+predictGBM <- predict(GBM_modFit, newdata=testset)
+confMatGBM <- confusionMatrix(predictGBM, testset$classe)
+confMatGBM
+```
+
+For the GB model we have **Accuracy: 0.984**
+
+---
+
+###Selected Model and test data
+
+Based on previous results, the best model in terms of accuracy is Random Forest.
+We use that model to predict the 20 quiz results (test dataset).
+
+```{r}
+QuizResults <- predict(RF_model, newdata=test)
+QuizResults
+
+
+```
+
+---
+
+###Appendix
+
+```{r}
+# Decision tree method
+plot(DTree_ConfMat$table, col = DTree_ConfMat$byClass, 
+     main = "Decision Tree Method")
+
+# Random Forest
+plot(RF_confMatrix$table, col = RF_confMatrix$byClass,
+              main = "Random Forest Method")
+
+# Generalized Boosted Model
+plot(confMatGBM$table, col = confMatGBM$byClass,
+     main = "Generalized Boosted Model")
+
+```
+
